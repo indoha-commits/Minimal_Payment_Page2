@@ -1,229 +1,128 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { useParams, useSearchParams } from "react-router";
+import { CheckCircle2, XCircle, Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Card } from "./ui/card";
 
-type PaymentStatus = "idle" | "pending" | "success" | "failed";
+type PublicInfo = {
+  payment_intent: {
+    id: string;
+    status: string;
+    intent_type: string;
+    amount: number;
+    currency: string;
+    created_at: string;
+  };
+  invoice: {
+    id: string;
+    invoice_number: string;
+    invoice_type: string;
+    amount: number;
+    currency: string;
+    status: string;
+    paid_at: string | null;
+  } | null;
+  momo: {
+    payee_number: string;
+    reference: string;
+    amount: number;
+    currency: string;
+    qr_svg: string;
+  };
+  pay_url: string;
+};
+
+type PageState =
+  | { kind: "loading" }
+  | { kind: "error"; message: string }
+  | { kind: "ready"; info: PublicInfo };
 
 export default function PaymentPage() {
-  const invoiceId = new URLSearchParams(window.location.search).get("invoice_id") || "";
-  const [phoneNumber, setPhoneNumber] = useState("");
-  const [status, setStatus] = useState<PaymentStatus>("idle");
+  const { tenant, paymentIntentId } = useParams<{ tenant: string; paymentIntentId: string }>();
+  const [searchParams] = useSearchParams();
+  const accessToken = searchParams.get("access_token") || "";
   const apiBase = (import.meta.env.VITE_PAYMENT_API_BASE_URL as string | undefined) || "";
-  const internalBase = (import.meta.env.VITE_INTERNAL_DASHBOARD_BASE_URL as string | undefined) || "";
-  const [error, setError] = useState("");
-  const [manualRef, setManualRef] = useState("");
-  const [paymentIntentId, setPaymentIntentId] = useState("");
-  const [manualFile, setManualFile] = useState<File | null>(null);
-  const [manualStatus, setManualStatus] = useState<"idle" | "pending" | "success" | "failed">("idle");
-  const [manualError, setManualError] = useState("");
 
-  const [invoiceData, setInvoiceData] = useState<{
-    invoiceNumber: string;
-    setupFee: number;
-    vatRate: number;
-    currency: string;
-    tenantName: string;
-    tenantSubdomain?: string;
-  } | null>(null);
+  const [state, setState] = useState<PageState>({ kind: "loading" });
+  const [txId, setTxId] = useState("");
+  const [payerPhone, setPayerPhone] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
-  const vatAmount = invoiceData ? invoiceData.setupFee * invoiceData.vatRate : 0;
-  const totalAmount = invoiceData ? invoiceData.setupFee + vatAmount : 0;
-
-  const validatePhoneNumber = (phone: string): boolean => {
-    // Rwanda MSISDN format: 25078XXXXXXX or 25079XXXXXXX
-    const regex = /^2507[8-9]\d{7}$/;
-    return regex.test(phone);
-  };
-
-  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.replace(/\D/g, ""); // Remove non-digits
-    setPhoneNumber(value);
-    setError("");
-  };
-
-  const handleManualFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] ?? null;
-    setManualFile(file);
-    setManualError("");
-  };
-
-  const handleManualSubmit = async () => {
-    if (!manualFile || !invoiceId) {
-      setManualError("Please upload proof of payment");
-      return;
-    }
-
-    try {
-      setManualError("");
-      setManualStatus("pending");
-
-      const form = new FormData();
-      form.append("invoice_id", invoiceId);
-      if (manualRef) form.append("reference", manualRef);
-      form.append("file", manualFile);
-
-      const res = await fetch(`${apiBase}/payments/manual/proof`, {
-        method: "POST",
-        body: form,
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || "Upload failed");
-
-      setManualStatus("success");
-    } catch (err: any) {
-      setManualStatus("failed");
-      setManualError(String(err?.message ?? err));
-    }
-  };
-
-  const handleSendPayment = async () => {
-    if (!validatePhoneNumber(phoneNumber)) {
-      setError("Invalid phone number");
-      return;
-    }
-
-    try {
-      setError("");
-      setStatus("pending");
-
-      if (!apiBase) throw new Error("Missing VITE_PAYMENT_API_BASE_URL");
-      if (!invoiceId) throw new Error("Missing invoice id");
-
-      const payRes = await fetch(`${apiBase}/payments/momo/pay`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          invoice_id: invoiceId,
-          phone: phoneNumber,
-        }),
-      });
-
-      const payJson = await payRes.json().catch(() => ({}));
-      if (!payRes.ok) throw new Error(payJson?.error || "Payment request failed");
-
-      const txId = payJson.tx_id as string | undefined;
-      const createdPaymentIntentId = payJson.payment_intent_id as string | undefined;
-      if (!txId || !createdPaymentIntentId) throw new Error("Missing transaction id");
-      setPaymentIntentId(createdPaymentIntentId);
-
-      let attempts = 0;
-      const poll = async () => {
-        attempts += 1;
-        const statusRes = await fetch(`${apiBase}/payments/momo/status?payment_intent_id=${encodeURIComponent(paymentIntentId || '')}`);
-        const statusJson = await statusRes.json().catch(() => ({}));
-        if (!statusRes.ok) throw new Error(statusJson?.error || "Status check failed");
-
-        if (statusJson.status === "SUCCESSFUL") {
-          setStatus("success");
-
-          const tenantSlug = (invoiceData?.tenantSubdomain || invoiceData?.tenantName || "").
-            toString()
-            .trim()
-            .toLowerCase()
-            .replace(/\s+/g, "-")
-            .replace(/[^a-z0-9-]/g, "");
-
-          if (internalBase && tenantSlug) {
-            setTimeout(() => {
-              window.location.href = `${internalBase.replace(/\/$/, "")}/${tenantSlug}`;
-            }, 1500);
-          }
-
-          return;
-        }
-        if (statusJson.status === "FAILED" || statusJson.status === "REJECTED") {
-          setStatus("failed");
-          setError("Payment failed — try again");
-          return;
-        }
-
-        if (attempts < 20) {
-          setTimeout(poll, 3000);
-        } else {
-          setStatus("failed");
-          setError("Payment still pending. Please check your phone.");
-        }
-      };
-
-      setTimeout(poll, 3000);
-    } catch (err: any) {
-      setStatus("failed");
-      setError(String(err?.message ?? err));
-    }
-  };
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-RW", {
+  const formatCurrency = (amount: number) =>
+    new Intl.NumberFormat("en-RW", {
       style: "decimal",
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
-    }).format(amount);
-  };
+    }).format(Number(amount || 0));
 
   useEffect(() => {
     const load = async () => {
-      if (!apiBase || !invoiceId) return;
+      if (!apiBase) {
+        setState({ kind: "error", message: "Payment service is not configured." });
+        return;
+      }
+      if (!paymentIntentId) {
+        setState({ kind: "error", message: "Missing payment reference." });
+        return;
+      }
       try {
-        const res = await fetch(`${apiBase}/payments/invoice?invoice_id=${encodeURIComponent(invoiceId)}`);
+        const q = new URLSearchParams({ payment_intent_id: paymentIntentId });
+        if (accessToken) q.set("access_token", accessToken);
+        const res = await fetch(`${apiBase}/payments/public/info?${q.toString()}`);
         const json = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(json?.error || "Failed to load invoice");
-
-        const amount = Number(json?.invoice?.amount ?? 0);
-        const currency = String(json?.invoice?.currency ?? "RWF");
-        const invoiceNumber = String(json?.invoice?.invoice_number ?? "—");
-        const tenantName = String(json?.tenant?.company_name ?? "—");
-        const tenantSubdomain = String(json?.tenant?.subdomain ?? "");
-
-        setInvoiceData({
-          invoiceNumber,
-          setupFee: amount,
-          vatRate: 0.18,
-          currency,
-          tenantName,
-          tenantSubdomain,
-        });
+        if (!res.ok) throw new Error(json?.error || "Failed to load payment");
+        setState({ kind: "ready", info: json as PublicInfo });
       } catch (err: any) {
-        setError(String(err?.message ?? err));
+        setState({ kind: "error", message: String(err?.message ?? err) });
       }
     };
-
     void load();
-  }, [apiBase, invoiceId]);
+  }, [apiBase, paymentIntentId, accessToken]);
 
-  const getStatusMessage = () => {
-    switch (status) {
-      case "pending":
-        return (
-          <div className="flex items-center gap-2 text-blue-600">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span>Check your phone to approve payment</span>
-          </div>
-        );
-      case "success":
-        return (
-          <div className="flex items-center gap-2 text-[#22C55E]">
-            <CheckCircle2 className="h-5 w-5" />
-            <span>Payment successful — receipt sent</span>
-          </div>
-        );
-      case "failed":
-        return (
-          <div className="flex items-center gap-2 text-red-600">
-            <XCircle className="h-5 w-5" />
-            <span>{error}</span>
-          </div>
-        );
-      default:
-        return null;
+  const handleConfirm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (state.kind !== "ready") return;
+    if (!txId.trim()) {
+      setSubmitError("Enter the MoMo transaction ID from your payment app.");
+      return;
+    }
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      const res = await fetch(`${apiBase}/payments/public/confirm`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          payment_intent_id: state.info.payment_intent.id,
+          access_token: accessToken,
+          momo_transaction_id: txId.trim(),
+          payer_phone: payerPhone.trim() || undefined,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Confirmation failed");
+      setTxId("");
+      setPayerPhone("");
+      const q = new URLSearchParams({ payment_intent_id: state.info.payment_intent.id });
+      if (accessToken) q.set("access_token", accessToken);
+      const infoRes = await fetch(`${apiBase}/payments/public/info?${q.toString()}`);
+      const infoJson = await infoRes.json().catch(() => null);
+      if (infoJson?.payment_intent) setState({ kind: "ready", info: infoJson });
+    } catch (err: any) {
+      setSubmitError(String(err?.message ?? err));
+    } finally {
+      setSubmitting(false);
     }
   };
+
+  const isPaid = state.kind === "ready" && state.info.payment_intent.status === "completed";
+  const isAwaiting = state.kind === "ready" && state.info.payment_intent.status === "pending_confirmation";
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="w-full max-w-[520px]">
-        {/* Main Card */}
         <Card className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
           {/* Header */}
           <div className="px-8 py-6 border-b border-gray-100 flex items-center justify-between">
@@ -236,127 +135,185 @@ export default function PaymentPage() {
             <span className="text-sm text-gray-500">Billing</span>
           </div>
 
-          {/* Tenant Info */}
-          <div className="px-8 pt-8 pb-6">
-            <h1 className="text-2xl font-semibold text-gray-900 capitalize">
-              {invoiceData?.tenantName || "Loading..."}
-            </h1>
-            <p className="text-sm text-gray-500 mt-1">{invoiceData?.invoiceNumber || "—"}</p>
-          </div>
-
-          {/* Invoice Summary */}
-          <div className="px-8 pb-6">
-            <div className="bg-gray-50 rounded-lg p-6 space-y-3">
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-gray-600">Setup Fee (HT)</span>
-                <span className="text-gray-900 font-medium">
-                  {invoiceData ? `${formatCurrency(invoiceData.setupFee)} ${invoiceData.currency}` : "—"}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-gray-600">VAT 18%</span>
-                <span className="text-gray-900 font-medium">
-                  {invoiceData ? `${formatCurrency(vatAmount)} ${invoiceData.currency}` : "—"}
-                </span>
-              </div>
-              <div className="h-px bg-gray-200 my-2" />
-              <div className="flex justify-between items-center">
-                <span className="text-gray-900 font-semibold">Total (TTC)</span>
-                <span className="text-xl font-bold text-[#1E3A8A]">
-                  {invoiceData ? `${formatCurrency(totalAmount)} ${invoiceData.currency}` : "—"}
-                </span>
-              </div>
+          {state.kind === "loading" && (
+            <div className="px-8 py-16 flex items-center justify-center text-gray-500">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              Loading…
             </div>
-          </div>
+          )}
 
-          {/* Payment Form */}
-          <div className="px-8 pb-6 space-y-6">
-            <div className="space-y-2">
-              <label htmlFor="phone" className="text-sm font-medium text-gray-700 block">
-                Phone Number (MTN MoMo)
-              </label>
-              <Input
-                id="phone"
-                type="tel"
-                placeholder="25078XXXXXXX"
-                value={phoneNumber}
-                onChange={handlePhoneChange}
-                maxLength={12}
-                className={`h-12 ${error && status === "idle" ? "border-red-500" : ""}`}
-                disabled={status === "pending"}
-              />
-              {error && status === "idle" && (
-                <p className="text-sm text-red-600">{error}</p>
+          {state.kind === "error" && (
+            <div className="px-8 py-16 space-y-3 text-center">
+              <AlertTriangle className="h-8 w-8 mx-auto text-red-500" />
+              <p className="text-gray-700 font-medium">{state.message}</p>
+              {!accessToken && (
+                <p className="text-sm text-gray-500">
+                  This payment link is missing its access token. Use the link from your invoice email.
+                </p>
               )}
             </div>
+          )}
 
-            <Button
-              onClick={handleSendPayment}
-              disabled={status === "pending" || !phoneNumber}
-              className="w-full h-12 bg-[#1E3A8A] hover:bg-[#1E3A8A]/90 text-white font-medium rounded-lg"
-            >
-              {status === "pending" ? (
-                <span className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Processing...
-                </span>
+          {state.kind === "ready" && (
+            <>
+              <div className="px-8 pt-8 pb-6">
+                <h1 className="text-2xl font-semibold text-gray-900 capitalize">
+                  {tenant ? decodeURIComponent(tenant) : "Payment"}
+                </h1>
+                <p className="text-sm text-gray-500 mt-1">
+                  {state.info.invoice?.invoice_number || state.info.payment_intent.id.slice(0, 8)}
+                </p>
+              </div>
+
+              {/* Invoice Summary */}
+              <div className="px-8 pb-6">
+                <div className="bg-gray-50 rounded-lg p-6 space-y-3">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600">Setup Fee</span>
+                    <span className="text-gray-900 font-medium">
+                      {formatCurrency(state.info.momo.amount)} {state.info.momo.currency}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600">VAT included</span>
+                    <span className="text-gray-500">—</span>
+                  </div>
+                  <div className="h-px bg-gray-200 my-2" />
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-900 font-semibold">Total</span>
+                    <span className="text-xl font-bold text-[#1E3A8A]">
+                      {formatCurrency(state.info.momo.amount)} {state.info.momo.currency}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {isPaid ? (
+                <div className="px-8 pb-8">
+                  <div className="bg-green-50 rounded-lg p-4 flex items-start gap-3">
+                    <CheckCircle2 className="h-5 w-5 text-[#22C55E] shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-gray-900 font-medium">Payment received</p>
+                      <p className="text-sm text-gray-600 mt-1">
+                        {state.info.invoice?.paid_at
+                          ? `Paid on ${new Date(state.info.invoice.paid_at).toLocaleDateString()}.`
+                          : "Your account is being activated."}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : isAwaiting ? (
+                <div className="px-8 pb-8">
+                  <div className="bg-amber-50 rounded-lg p-4 flex items-start gap-3">
+                    <Loader2 className="h-5 w-5 text-amber-600 animate-spin shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-gray-900 font-medium">Payment submitted</p>
+                      <p className="text-sm text-gray-600 mt-1">
+                        We received your MoMo transaction. A platform operator will verify it and activate
+                        your account shortly.
+                      </p>
+                    </div>
+                  </div>
+                </div>
               ) : (
-                "Send Payment Prompt"
+                <>
+                  {/* MoMo Payment */}
+                  <div className="px-8 pb-6">
+                    <div className="bg-gray-50 rounded-lg p-6 space-y-4">
+                      <div className="text-center">
+                        <img
+                          src={state.info.momo.qr_svg}
+                          alt="MTN MoMo payment QR code"
+                          className="w-44 h-44 mx-auto rounded-lg border border-gray-200 bg-white"
+                        />
+                        <p className="text-xs text-gray-500 mt-2">Scan with your MoMo app</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <div className="text-xs text-gray-500 uppercase tracking-wide">Payee</div>
+                          <div className="font-mono font-semibold text-gray-900">{state.info.momo.payee_number}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-500 uppercase tracking-wide">Reference</div>
+                          <div className="font-mono font-semibold text-gray-900">{state.info.momo.reference}</div>
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        In your MoMo app choose <span className="font-semibold text-gray-700">Pay</span>, enter the
+                        payee number and amount, and use the reference above. Keep the transaction ID you receive.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Confirm Form */}
+                  <div className="px-8 pb-6">
+                    <form onSubmit={handleConfirm} className="space-y-4">
+                      <div className="space-y-1.5">
+                        <label htmlFor="tx" className="text-sm font-medium text-gray-700 block">
+                          MoMo transaction ID
+                        </label>
+                        <Input
+                          id="tx"
+                          type="text"
+                          placeholder="e.g. MTN-TX-1234567890"
+                          value={txId}
+                          onChange={(e) => {
+                            setTxId(e.target.value);
+                            setSubmitError("");
+                          }}
+                          className="h-12"
+                          required
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label htmlFor="phone" className="text-sm font-medium text-gray-700 block">
+                          Payer phone (optional)
+                        </label>
+                        <Input
+                          id="phone"
+                          type="tel"
+                          placeholder="25078XXXXXXX"
+                          value={payerPhone}
+                          onChange={(e) => setPayerPhone(e.target.value)}
+                          className="h-12"
+                        />
+                      </div>
+
+                      {submitError && (
+                        <div className="flex items-center gap-2 text-sm text-red-600">
+                          <XCircle className="h-4 w-4 shrink-0" />
+                          {submitError}
+                        </div>
+                      )}
+
+                      <Button
+                        type="submit"
+                        disabled={submitting}
+                        className="w-full h-12 bg-[#1E3A8A] hover:bg-[#1E3A8A]/90 text-white font-medium rounded-lg"
+                      >
+                        {submitting ? (
+                          <span className="flex items-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Submitting…
+                          </span>
+                        ) : (
+                          "I've paid — confirm my payment"
+                        )}
+                      </Button>
+                      <p className="text-xs text-gray-500 text-center">
+                        Your payment is verified manually before your account is activated.
+                      </p>
+                    </form>
+                  </div>
+                </>
               )}
-            </Button>
-
-            <div className="border-t border-gray-200 pt-4">
-              <div className="text-sm font-medium text-gray-700">Or upload proof of payment</div>
-              <p className="text-xs text-gray-500 mt-1">
-                Pay via bank/visa and upload your receipt. We will confirm and activate your account.
-              </p>
-              <div className="mt-3 space-y-2">
-                <Input
-                  type="text"
-                  placeholder="Payment reference (optional)"
-                  value={manualRef}
-                  onChange={(e) => setManualRef(e.target.value)}
-                  className="h-10"
-                />
-                <Input type="file" onChange={handleManualFile} className="h-10" />
-                {manualError && manualStatus !== "pending" && (
-                  <p className="text-sm text-red-600">{manualError}</p>
-                )}
-              </div>
-              <Button
-                onClick={handleManualSubmit}
-                disabled={manualStatus === "pending" || !manualFile}
-                className="w-full mt-3 h-11 bg-gray-900 hover:bg-gray-900/90 text-white"
-              >
-                {manualStatus === "pending" ? (
-                  <span className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Uploading...
-                  </span>
-                ) : manualStatus === "success" ? (
-                  "Receipt submitted"
-                ) : (
-                  "Submit Proof of Payment"
-                )}
-              </Button>
-            </div>
-          </div>
-
-          {/* Status Message */}
-          {status !== "idle" && (
-            <div className="px-8 pb-8">
-              <div className="bg-gray-50 rounded-lg p-4 text-sm font-medium">
-                {getStatusMessage()}
-              </div>
-            </div>
+            </>
           )}
         </Card>
 
         {/* Footer */}
         <div className="mt-8 text-center space-y-2">
-          <p className="text-sm text-gray-600">
-            KG 123 St, Kigali, Rwanda
-          </p>
+          <p className="text-sm text-gray-600">KG 123 St, Kigali, Rwanda</p>
           <div className="flex items-center justify-center gap-4 text-sm text-gray-500">
             <a href="mailto:support@indataflow.com" className="hover:text-[#1E3A8A]">
               support@indataflow.com
