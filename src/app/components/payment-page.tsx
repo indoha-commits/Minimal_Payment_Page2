@@ -28,7 +28,10 @@ type PublicInfo = {
     reference: string;
     amount: number;
     currency: string;
-    qr_svg: string;
+  };
+  brand?: {
+    name: string;
+    logo_url: string;
   };
   pricing?: {
     usd_amount: number;
@@ -130,18 +133,25 @@ export default function PaymentPage() {
   const isAwaiting = state.kind === "ready" && state.info.payment_intent.status === "pending_confirmation";
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "#F7F9FB", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" }}>
       <div className="w-full max-w-[520px]">
-        <Card className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <Card className="bg-white rounded-xl shadow-sm overflow-hidden" style={{ border: "1px solid rgba(11, 28, 45, 0.12)", boxShadow: "0 6px 28px rgba(11, 28, 45, 0.1)" }}>
           {/* Header */}
-          <div className="px-8 py-6 border-b border-gray-100 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-[#1E3A8A] flex items-center justify-center">
-                <span className="text-white text-sm font-bold">ID</span>
+          <div className="px-8 py-7 flex items-center justify-center" style={{ backgroundColor: "#0a1929" }}>
+            {state.kind === "ready" && state.info.brand?.logo_url ? (
+              <img
+                src={state.info.brand.logo_url}
+                alt={state.info.brand.name || "InDataFlow"}
+                className="h-14 w-auto object-contain"
+              />
+            ) : (
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: "#0B1C2D" }}>
+                  <span className="text-white text-sm font-bold">ID</span>
+                </div>
+                <span className="text-white font-semibold">InDataFlow</span>
               </div>
-              <span className="text-gray-900 font-semibold">InDataFlow</span>
-            </div>
-            <span className="text-sm text-gray-500">Billing</span>
+            )}
           </div>
 
           {state.kind === "loading" && (
@@ -176,7 +186,16 @@ export default function PaymentPage() {
 
               {/* Invoice Summary */}
               <div className="px-8 pb-6">
-                <div className="bg-gray-50 rounded-lg p-6 space-y-3">
+                <div className="rounded-lg p-6 space-y-3" style={{ backgroundColor: "#F7F9FB", border: "1px solid rgba(11, 28, 45, 0.12)" }}>
+                  <div className="flex justify-between items-end">
+                    <span className="text-sm font-medium" style={{ color: "#5A6B7D" }}>
+                      Total to pay
+                    </span>
+                    <span className="text-2xl font-bold" style={{ color: "#0B1C2D" }}>
+                      {formatCurrency(state.info.momo.amount)} {state.info.momo.currency}
+                    </span>
+                  </div>
+                  <div className="h-px" style={{ backgroundColor: "rgba(11, 28, 45, 0.12)" }} />
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-gray-600">Monthly subscription</span>
                     <span className="text-gray-900 font-medium">
@@ -208,13 +227,6 @@ export default function PaymentPage() {
                       </span>
                     </div>
                   ) : null}
-                  <div className="h-px bg-gray-200 my-2" />
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-900 font-semibold">Total to pay</span>
-                    <span className="text-xl font-bold text-[#1E3A8A]">
-                      {formatCurrency(state.info.momo.amount)} {state.info.momo.currency}
-                    </span>
-                  </div>
                 </div>
               </div>
 
@@ -249,14 +261,9 @@ export default function PaymentPage() {
                 <>
                   {/* MoMo Payment */}
                   <div className="px-8 pb-6">
-                    <div className="bg-gray-50 rounded-lg p-6 space-y-4">
-                      <div className="text-center">
-                        <img
-                          src={state.info.momo.qr_svg}
-                          alt="MTN MoMo payment QR code"
-                          className="w-44 h-44 mx-auto rounded-lg border border-gray-200 bg-white"
-                        />
-                        <p className="text-xs text-gray-500 mt-2">Scan with your MoMo app</p>
+                    <div className="rounded-lg p-6 space-y-4" style={{ backgroundColor: "#F7F9FB", border: "1px solid rgba(11, 28, 45, 0.12)", borderLeft: "4px solid #C7A14A" }}>
+                      <div className="text-sm font-semibold" style={{ color: "#0B1C2D" }}>
+                        Pay via MTN MoMo
                       </div>
                       <div className="grid grid-cols-2 gap-3 text-sm">
                         <div>
@@ -269,7 +276,7 @@ export default function PaymentPage() {
                         </div>
                       </div>
                       <p className="text-xs text-gray-500">
-                        After you pay, MTN MoMo sends you an SMS with a{" "}
+                        Send the amount above to the payee number, then MTN MoMo sends you an SMS with a{" "}
                         <span className="font-semibold text-gray-700">Transaction ID</span>. Enter that ID below to
                         confirm your payment.
                       </p>
@@ -320,7 +327,8 @@ export default function PaymentPage() {
                       <Button
                         type="submit"
                         disabled={submitting}
-                        className="w-full h-12 bg-[#1E3A8A] hover:bg-[#1E3A8A]/90 text-white font-medium rounded-lg"
+                        className="w-full h-12 text-white font-medium rounded-lg"
+                        style={{ backgroundColor: "#0a1929" }}
                       >
                         {submitting ? (
                           <span className="flex items-center gap-2">
@@ -344,13 +352,14 @@ export default function PaymentPage() {
 
         {/* Footer */}
         <div className="mt-8 text-center space-y-2">
-          <p className="text-sm text-gray-600">KG 123 St, Kigali, Rwanda</p>
+          <p className="text-sm font-semibold" style={{ color: "#0B1C2D" }}>INDATAFLOW LTD</p>
+          <p className="text-sm text-gray-500">KG 123 St, Kigali, Rwanda</p>
           <div className="flex items-center justify-center gap-4 text-sm text-gray-500">
-            <a href="mailto:support@indataflow.com" className="hover:text-[#1E3A8A]">
+            <a href="mailto:support@indataflow.com" style={{ color: "#0a1929" }}>
               support@indataflow.com
             </a>
             <span>•</span>
-            <a href="tel:+250788123456" className="hover:text-[#1E3A8A]">
+            <a href="tel:+250788123456" style={{ color: "#0a1929" }}>
               +250 788 123 456
             </a>
           </div>
