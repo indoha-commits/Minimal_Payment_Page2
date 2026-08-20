@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
-import { CheckCircle2, XCircle, Loader2, AlertTriangle } from "lucide-react";
+import { CheckCircle2, XCircle, Loader2, AlertTriangle, Clock } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Card } from "./ui/card";
@@ -116,10 +116,27 @@ export default function PaymentPage() {
       if (!res.ok) throw new Error(json?.error || "Confirmation failed");
       setTxId("");
       setPayerPhone("");
+      setSubmitError("");
+      setSubmitting(false);
+
+      // Show "waiting for approval" immediately instead of looping on the form.
+      setState((prev) =>
+        prev.kind === "ready"
+          ? {
+              kind: "ready",
+              info: {
+                ...prev.info,
+                payment_intent: { ...prev.info.payment_intent, status: "pending_confirmation" },
+              },
+            }
+          : prev
+      );
+
+      // Sync with the server's view (non-blocking; keeps this screen truthful).
       const q = new URLSearchParams({ payment_intent_id: state.info.payment_intent.id });
       if (accessToken) q.set("access_token", accessToken);
-      const infoRes = await fetch(`${apiBase}/payments/public/info?${q.toString()}`);
-      const infoJson = await infoRes.json().catch(() => null);
+      const infoRes = await fetch(`${apiBase}/payments/public/info?${q.toString()}`).catch(() => null);
+      const infoJson = await infoRes?.json().catch(() => null);
       if (infoJson?.payment_intent) setState({ kind: "ready", info: infoJson });
     } catch (err: any) {
       setSubmitError(String(err?.message ?? err));
@@ -246,12 +263,15 @@ export default function PaymentPage() {
               ) : isAwaiting ? (
                 <div className="px-8 pb-8">
                   <div className="bg-amber-50 rounded-lg p-4 flex items-start gap-3">
-                    <Loader2 className="h-5 w-5 text-amber-600 animate-spin shrink-0 mt-0.5" />
+                    <Clock className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-gray-900 font-medium">Payment submitted</p>
+                      <p className="text-gray-900 font-medium">Waiting for approval</p>
                       <p className="text-sm text-gray-600 mt-1">
-                        We received your MoMo transaction. A platform operator will verify it and activate
-                        your account shortly.
+                        Your transaction ID was submitted. A platform operator will verify your payment against
+                        the MoMo confirmation and activate your account — usually within a few minutes.
+                      </p>
+                      <p className="text-sm text-gray-600 mt-1">
+                        You'll also receive a confirmation email once it's approved. No need to resubmit.
                       </p>
                     </div>
                   </div>
