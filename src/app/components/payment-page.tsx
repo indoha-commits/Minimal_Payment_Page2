@@ -25,7 +25,6 @@ type PublicInfo = {
   } | null;
   momo: {
     payee_number: string;
-    reference: string;
     amount: number;
     currency: string;
   };
@@ -76,7 +75,7 @@ export default function PaymentPage() {
         return;
       }
       if (!paymentIntentId) {
-        setState({ kind: "error", message: "Missing payment reference." });
+        setState({ kind: "error", message: "Missing payment link." });
         return;
       }
       try {
@@ -265,15 +264,9 @@ export default function PaymentPage() {
                       <div className="text-sm font-semibold" style={{ color: "#0B1C2D" }}>
                         Pay via MTN MoMo
                       </div>
-                      <div className="grid grid-cols-2 gap-3 text-sm">
-                        <div>
-                          <div className="text-xs text-gray-500 uppercase tracking-wide">Payee</div>
-                          <div className="font-mono font-semibold text-gray-900">{state.info.momo.payee_number}</div>
-                        </div>
-                        <div>
-                          <div className="text-xs text-gray-500 uppercase tracking-wide">Reference</div>
-                          <div className="font-mono font-semibold text-gray-900">{state.info.momo.reference}</div>
-                        </div>
+                      <div className="text-sm">
+                        <span className="text-xs text-gray-500 uppercase tracking-wide">Payee </span>
+                        <span className="font-mono font-semibold text-gray-900">{state.info.momo.payee_number}</span>
                       </div>
                       <p className="text-xs text-gray-500">
                         Send the amount above to the payee number, then MTN MoMo sends you an SMS with a{" "}
