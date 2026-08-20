@@ -30,6 +30,15 @@ type PublicInfo = {
     currency: string;
     qr_svg: string;
   };
+  pricing?: {
+    usd_amount: number;
+    usd_rwf_rate: number;
+    vat_rate: number;
+    net_amount: number;
+    vat_amount: number;
+    total_amount: number;
+    currency: string;
+  };
   pay_url: string;
 };
 
@@ -85,7 +94,7 @@ export default function PaymentPage() {
     e.preventDefault();
     if (state.kind !== "ready") return;
     if (!txId.trim()) {
-      setSubmitError("Enter the MoMo transaction ID from your payment app.");
+      setSubmitError("Enter the Transaction ID from your MoMo SMS.");
       return;
     }
     setSubmitting(true);
@@ -169,18 +178,39 @@ export default function PaymentPage() {
               <div className="px-8 pb-6">
                 <div className="bg-gray-50 rounded-lg p-6 space-y-3">
                   <div className="flex justify-between items-center text-sm">
-                    <span className="text-gray-600">Setup Fee</span>
+                    <span className="text-gray-600">Monthly subscription</span>
                     <span className="text-gray-900 font-medium">
-                      {formatCurrency(state.info.momo.amount)} {state.info.momo.currency}
+                      {formatCurrency(state.info.pricing?.net_amount ?? state.info.momo.amount)}{" "}
+                      {state.info.momo.currency}
                     </span>
                   </div>
                   <div className="flex justify-between items-center text-sm">
-                    <span className="text-gray-600">VAT included</span>
-                    <span className="text-gray-500">—</span>
+                    <span className="text-gray-600">
+                      VAT ({Math.round((state.info.pricing?.vat_rate ?? 0.18) * 100)}%)
+                    </span>
+                    <span className="text-gray-500">
+                      {formatCurrency(state.info.pricing?.vat_amount ?? 0)} {state.info.momo.currency}
+                    </span>
                   </div>
+                  {state.info.pricing?.usd_rwf_rate ? (
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-600">Rate (current)</span>
+                      <span className="text-gray-500">
+                        1 USD ≈ {formatCurrency(state.info.pricing.usd_rwf_rate)} RWF
+                      </span>
+                    </div>
+                  ) : null}
+                  {state.info.pricing?.usd_amount ? (
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-600">Plan price</span>
+                      <span className="text-gray-500">
+                        ≈ USD {formatCurrency(state.info.pricing.usd_amount)} / month
+                      </span>
+                    </div>
+                  ) : null}
                   <div className="h-px bg-gray-200 my-2" />
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-900 font-semibold">Total</span>
+                    <span className="text-gray-900 font-semibold">Total to pay</span>
                     <span className="text-xl font-bold text-[#1E3A8A]">
                       {formatCurrency(state.info.momo.amount)} {state.info.momo.currency}
                     </span>
@@ -239,8 +269,9 @@ export default function PaymentPage() {
                         </div>
                       </div>
                       <p className="text-xs text-gray-500">
-                        In your MoMo app choose <span className="font-semibold text-gray-700">Pay</span>, enter the
-                        payee number and amount, and use the reference above. Keep the transaction ID you receive.
+                        After you pay, MTN MoMo sends you an SMS with a{" "}
+                        <span className="font-semibold text-gray-700">Transaction ID</span>. Enter that ID below to
+                        confirm your payment.
                       </p>
                     </div>
                   </div>
@@ -250,12 +281,12 @@ export default function PaymentPage() {
                     <form onSubmit={handleConfirm} className="space-y-4">
                       <div className="space-y-1.5">
                         <label htmlFor="tx" className="text-sm font-medium text-gray-700 block">
-                          MoMo transaction ID
+                          Transaction ID (from your MoMo SMS)
                         </label>
                         <Input
                           id="tx"
                           type="text"
-                          placeholder="e.g. MTN-TX-1234567890"
+                          placeholder="e.g. the ID from your MoMo SMS"
                           value={txId}
                           onChange={(e) => {
                             setTxId(e.target.value);
